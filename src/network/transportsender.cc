@@ -167,7 +167,8 @@ void TransportSender<MyState>::tick( void )
     
   string diff = current_state.diff_from( assumed_receiver_state->state );
 
-  attempt_prospective_resend_optimization( diff );
+  /* todo investigate whether it matters */
+/*  attempt_prospective_resend_optimization( diff );*/
 
   if ( verbose ) {
     /* verify diff has round-trip identity (modulo Unicode fallback rendering) */

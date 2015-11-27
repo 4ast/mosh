@@ -92,7 +92,7 @@ pid_t my_forkpty( int *amaster, char *name,
     return -1;
   }
 
-#ifndef _AIX
+#if 0 //ndef _AIX
   if ( ioctl(slave, I_PUSH, "ptem") < 0 ||
        ioctl(slave, I_PUSH, "ldterm") < 0 ) {
     perror( "ioctl(I_PUSH)" );
@@ -108,13 +108,14 @@ pid_t my_forkpty( int *amaster, char *name,
   if ( name != NULL)
     strcpy( name, slave_name );
 
-  if ( termp != NULL ) {
+  if ( 0 && termp != NULL ) {
     if ( tcsetattr( slave, TCSAFLUSH, termp ) < 0 ) {
       perror( "tcsetattr" );
       exit( 1 );
     }
   }
 
+  if (0) {
   // we need to set initial window size, or TIOCGWINSZ fails
   struct winsize w;
   w.ws_row = 25;
@@ -130,6 +131,7 @@ pid_t my_forkpty( int *amaster, char *name,
       perror( "ioctl TIOCGWINSZ" );
       exit( 1 );
     }
+  }
   }
 
   pid = fork();

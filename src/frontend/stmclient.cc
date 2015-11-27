@@ -113,13 +113,9 @@ void STMClient::init( void )
       exit( 1 );
   }
 
-  /* Put terminal in application-cursor-key mode */
-  swrite( STDOUT_FILENO, display.open().c_str() );
+  /* Do NOT put terminal in application-cursor-key mode */
 
-  /* Add our name to window title */
-  if ( !getenv( "MOSH_TITLE_NOPREFIX" ) ) {
-    overlays.set_title_prefix( wstring( L"[mosh] " ) );
-  }
+  /* Do NOT add our name to window title */
 
   /* Set terminal escape key. */
   const char *escape_key_env;
@@ -199,7 +195,6 @@ void STMClient::shutdown( void )
   overlays.get_notification_engine().set_notification_string( wstring( L"" ) );
   overlays.get_notification_engine().server_heard( timestamp() );
   overlays.set_title_prefix( wstring( L"" ) );
-  output_new_frame();
 
   /* Restore terminal and terminal-driver state */
   swrite( STDOUT_FILENO, display.close().c_str() );
@@ -236,53 +231,36 @@ void STMClient::main_init( void )
     return;
   }  
 
-  /* local state */
-  local_framebuffer = new Terminal::Framebuffer( window_size.ws_col, window_size.ws_row );
-  new_state = new Terminal::Framebuffer( 1, 1 );
-
-  /* initialize screen */
-  string init = display.new_frame( false, *local_framebuffer, *local_framebuffer );
-  swrite( STDOUT_FILENO, init.data(), init.size() );
+  /* do NOT initialize screen */
 
   /* open network */
   Network::UserStream blank;
-  Terminal::Complete local_terminal( window_size.ws_col, window_size.ws_row );
-  network = new Network::Transport< Network::UserStream, Terminal::Complete >( blank, local_terminal,
+  Network::UserStream remote_blank;
+  network = new Network::Transport< Network::UserStream, Network::UserStream >( blank, remote_blank,
 									       key.c_str(), ip.c_str(), port.c_str() );
 
   network->set_send_delay( 1 ); /* minimal delay on outgoing keystrokes */
-
-  /* tell server the size of the terminal */
-  network->get_current_state().push_back( Parser::Resize( window_size.ws_col, window_size.ws_row ) );
 }
 
 void STMClient::output_new_frame( void )
 {
+  static uint64_t last_remote_num = network->get_remote_state_num();
   if ( !network ) { /* clean shutdown even when not initialized */
     return;
   }
+  if ( network->get_remote_state_num() != last_remote_num ) {
+    last_remote_num = network->get_remote_state_num();
 
-  /* fetch target state */
-  *new_state = network->get_latest_remote_state().state.get_fb();
+    string terminal_to_host;
 
-  /* apply local overlays */
-  overlays.apply( *new_state );
-
-  /* apply any mutations */
-  display.downgrade( *new_state );
-
-  /* calculate minimal difference from where we are */
-  const string diff( display.new_frame( !repaint_requested,
-					*local_framebuffer,
-					*new_state ) );
-  swrite( STDOUT_FILENO, diff.data(), diff.size() );
-
-  repaint_requested = false;
-
-  /* switch pointers */
-  Terminal::Framebuffer *tmp = new_state;
-  new_state = local_framebuffer;
-  local_framebuffer = tmp;
+    Network::UserStream us;
+    us.apply_string( network->get_remote_diff() );
+    for ( size_t i = 0; i < us.size(); i++ ) {
+            const Parser::Action *action = us.get_action( i );
+            terminal_to_host += ((Parser::UserByte *)action)->c;
+    }
+    swrite( 1, terminal_to_host.c_str(), terminal_to_host.length() );
+  }
 }
 
 void STMClient::process_network_input( void )
@@ -295,7 +273,6 @@ void STMClient::process_network_input( void )
 
   overlays.get_prediction_engine().set_local_frame_acked( network->get_sent_state_acked() );
   overlays.get_prediction_engine().set_send_interval( network->send_interval() );
-  overlays.get_prediction_engine().set_local_frame_late_acked( network->get_latest_remote_state().state.get_echo_ack() );
 }
 
 bool STMClient::process_user_input( int fd )
@@ -317,8 +294,6 @@ bool STMClient::process_user_input( int fd )
 
     for ( int i = 0; i < bytes_read; i++ ) {
       char the_byte = buf[ i ];
-
-      overlays.get_prediction_engine().new_user_byte( the_byte, *local_framebuffer );
 
       if ( quit_sequence_started ) {
 	if ( the_byte == '.' ) { /* Quit sequence is Ctrl-^ . */
@@ -374,7 +349,7 @@ bool STMClient::process_user_input( int fd )
 
       lf_entered = ( (the_byte == 0x0A) || (the_byte == 0x0D) ); /* LineFeed, Ctrl-J, '\n' or CarriageReturn, Ctrl-M, '\r' */
 
-      if ( the_byte == 0x0C ) { /* Ctrl-L */
+      if ( 0 && the_byte == 0x0C ) { /* Ctrl-L */
 	repaint_requested = true;
       }
 
@@ -477,7 +452,7 @@ bool STMClient::main( void )
 	}
       }
 
-      if ( sel.signal( SIGWINCH ) ) {
+      if ( 0 && sel.signal( SIGWINCH ) ) {
         /* resize */
         if ( !process_resize() ) { return false; }
       }

@@ -78,7 +78,7 @@ string UserStream::diff_from( const UserStream &existing ) const
       {
 	char the_byte = my_it->userbyte.c;
 	/* can we combine this with a previous Keystroke? */
-	if ( (output.instruction_size() > 0)
+	if ( 0 && (output.instruction_size() > 0)
 	     && (output.instruction( output.instruction_size() - 1 ).HasExtension( keystroke )) ) {
 	  output.mutable_instruction( output.instruction_size() - 1 )->MutableExtension( keystroke )->mutable_keys()->append( string( &the_byte, 1 ) );
 	} else {

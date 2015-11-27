@@ -29,7 +29,6 @@
     this exception statement from all source files in the program, then
     also delete it here.
 */
-
 #include "config.h"
 #include "version.h"
 
@@ -90,10 +89,16 @@
 
 #include "networktransport.cc"
 
-typedef Network::Transport< Terminal::Complete, Network::UserStream > ServerConnection;
+#ifndef __clang__
+/* centos 6 / gcc4.4 hack */
+#undef PRIu64
+#define PRIu64 "lu"
+#endif
+
+typedef Network::Transport< Network::UserStream, Network::UserStream > ServerConnection;
 
 static void serve( int host_fd,
-		   Terminal::Complete &terminal,
+		   Network::UserStream &terminal,
 		   ServerConnection &network,
 		   long network_timeout,
 		   long network_signaled_timeout );
@@ -385,8 +390,7 @@ static int run_server( const char *desired_ip, const char *desired_port,
     window_size.ws_row = 24;
   }
 
-  /* open parser and terminal */
-  Terminal::Complete terminal( window_size.ws_col, window_size.ws_row );
+  Network::UserStream terminal;
 
   /* open network */
   Network::UserStream blank;
@@ -516,7 +520,7 @@ static int run_server( const char *desired_ip, const char *desired_port,
 
     chdir_homedir();
 
-    if ( with_motd && (!motd_hushed()) ) {
+    if ( 0 && with_motd && (!motd_hushed()) ) {
       print_motd();
       warn_unattached( utmp_entry );
     }
@@ -562,7 +566,7 @@ static int run_server( const char *desired_ip, const char *desired_port,
   return 0;
 }
 
-static void serve( int host_fd, Terminal::Complete &terminal, ServerConnection &network, long network_timeout, long network_signaled_timeout )
+static void serve( int host_fd, Network::UserStream &terminal, ServerConnection &network, long network_timeout, long network_signaled_timeout )
 {
   /* scale timeouts */
   const uint64_t network_timeout_ms = static_cast<uint64_t>( network_timeout ) * 1000;
@@ -589,7 +593,6 @@ static void serve( int host_fd, Terminal::Complete &terminal, ServerConnection &
       uint64_t now = Network::timestamp();
 
       timeout = min( timeout, network.wait_time() );
-      timeout = min( timeout, terminal.wait_time( now ) );
       if ( (!network.get_remote_state_num())
 	   || network.shutdown_in_progress() ) {
         timeout = min( timeout, 5000 );
@@ -638,40 +641,16 @@ static void serve( int host_fd, Terminal::Complete &terminal, ServerConnection &
 	  last_remote_num = network.get_remote_state_num();
 
 	  string terminal_to_host;
-	  
+
 	  Network::UserStream us;
 	  us.apply_string( network.get_remote_diff() );
 	  /* apply userstream to terminal */
 	  for ( size_t i = 0; i < us.size(); i++ ) {
 	    const Parser::Action *action = us.get_action( i );
-	    terminal_to_host += terminal.act( action );
-	    if ( typeid( *action ) == typeid( Parser::Resize ) ) {
-	      /* tell child process of resize */
-	      const Parser::Resize *res = static_cast<const Parser::Resize *>( us.get_action( i ) );
-	      struct winsize window_size;
-	      if ( ioctl( host_fd, TIOCGWINSZ, &window_size ) < 0 ) {
-		perror( "ioctl TIOCGWINSZ" );
-		return;
-	      }
-	      window_size.ws_col = res->width;
-	      window_size.ws_row = res->height;
-	      if ( ioctl( host_fd, TIOCSWINSZ, &window_size ) < 0 ) {
-		perror( "ioctl TIOCSWINSZ" );
-		return;
-	      }
-	    }
+	    assert(typeid( *action ) == typeid( Parser::UserByte ));
+	    terminal_to_host += ((Parser::UserByte *)action)->c;
 	  }
 
-	  if ( !us.empty() ) {
-	    /* register input frame number for future echo ack */
-	    terminal.register_input_frame( last_remote_num, now );
-	  }
-
-	  /* update client with new state of terminal */
-	  if ( !network.shutdown_in_progress() ) {
-	    network.set_current_state( terminal );
-	  }
-	  
 	  /* write any writeback octets back to the host */
 	  if ( swrite( host_fd, terminal_to_host.c_str(), terminal_to_host.length() ) < 0 ) {
 	    break;
@@ -705,7 +684,7 @@ static void serve( int host_fd, Terminal::Complete &terminal, ServerConnection &
 	  #endif
 	}
       }
-      
+
       if ( (!network.shutdown_in_progress()) && sel.read( host_fd ) ) {
 	/* input from the host needs to be fed to the terminal */
 	const int buf_size = 16384;
@@ -719,15 +698,8 @@ static void serve( int host_fd, Terminal::Complete &terminal, ServerConnection &
         if ( bytes_read <= 0 ) {
 	  network.start_shutdown();
 	} else {
-	  string terminal_to_host = terminal.act( string( buf, bytes_read ) );
-	
-	  /* update client with new state of terminal */
-	  network.set_current_state( terminal );
-
-	  /* write any writeback octets back to the host */
-	  if ( swrite( host_fd, terminal_to_host.c_str(), terminal_to_host.length() ) < 0 ) {
-	    break;
-	  }
+	  for (int i = 0; i < bytes_read; i++)
+            network.get_current_state().push_back( Parser::UserByte( buf[i] ) );
 	}
       }
 
@@ -752,7 +724,7 @@ static void serve( int host_fd, Terminal::Complete &terminal, ServerConnection &
 	  break;
 	}
       }
-      
+
       if ( sel.error( network_fd ) ) {
 	/* network problem */
 	break;
@@ -792,13 +764,6 @@ static void serve( int host_fd, Terminal::Complete &terminal, ServerConnection &
 	}
       }
       #endif
-
-      if ( terminal.set_echo_ack( now ) ) {
-	/* update client with new echo ack */
-	if ( !network.shutdown_in_progress() ) {
-	  network.set_current_state( terminal );
-	}
-      }
 
       if ( !network.get_remote_state_num()
            && time_since_remote_state >= timeout_if_no_client ) {
