@@ -452,7 +452,7 @@ bool STMClient::main( void )
 	}
       }
 
-      if ( 0 && sel.signal( SIGWINCH ) ) {
+      if ( sel.signal( SIGWINCH ) ) {
         /* resize */
         if ( !process_resize() ) { return false; }
       }

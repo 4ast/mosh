@@ -647,8 +647,29 @@ static void serve( int host_fd, Network::UserStream &terminal, ServerConnection 
 	  /* apply userstream to terminal */
 	  for ( size_t i = 0; i < us.size(); i++ ) {
 	    const Parser::Action *action = us.get_action( i );
-	    assert(typeid( *action ) == typeid( Parser::UserByte ));
-	    terminal_to_host += ((Parser::UserByte *)action)->c;
+            if ( typeid( *action ) == typeid( Parser::Resize ) ) {
+	      /* elide consecutive Resize actions */
+	      if ( i < us.size() - 1 &&
+		   typeid( us.get_action( i + 1 ) ) == typeid( Parser::Resize ) ) {
+		continue;
+	      }
+	      /* tell child process of resize */
+	      const Parser::Resize *res = static_cast<const Parser::Resize *>( action );
+	      struct winsize window_size;
+	      if ( ioctl( host_fd, TIOCGWINSZ, &window_size ) < 0 ) {
+		perror( "ioctl TIOCGWINSZ" );
+		return;
+	      }
+	      window_size.ws_col = res->width;
+	      window_size.ws_row = res->height;
+	      if ( ioctl( host_fd, TIOCSWINSZ, &window_size ) < 0 ) {
+		perror( "ioctl TIOCSWINSZ" );
+		return;
+	      }
+            } else {
+	      assert(typeid( *action ) == typeid( Parser::UserByte ));
+	      terminal_to_host += ((Parser::UserByte *)action)->c;
+            }
 	  }
 
 	  /* write any writeback octets back to the host */
