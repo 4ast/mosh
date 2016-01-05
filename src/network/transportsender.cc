@@ -59,7 +59,7 @@ TransportSender<MyState>::TransportSender( Connection *s_connection, MyState &in
     shutdown_start( -1 ),
     ack_num( 0 ),
     pending_data_ack( false ),
-    SEND_MINDELAY( 8 ),
+    SEND_MINDELAY( 1 ),
     last_heard( 0 ),
     prng(),
     mindelay_clock( -1 )
@@ -77,7 +77,7 @@ unsigned int TransportSender<MyState>::send_interval( void ) const
     SEND_INTERVAL = SEND_INTERVAL_MAX;
   }
 
-  return SEND_INTERVAL;
+  return 1;//SEND_INTERVAL;
 }
 
 /* Housekeeping routine to calculate next send and ack times */
